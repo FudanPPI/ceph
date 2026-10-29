@@ -24,6 +24,10 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
+#ifdef HAVE_UNIRDMA
+#include <infiniband/unirdma.h>
+#endif
+
 #include <atomic>
 #include <functional>
 #include <string>
@@ -91,6 +95,7 @@ class Device {
     }
   }
   const char* get_name() { return name;}
+  ibv_device* get_ibv_device() { return device; }
   uint16_t get_lid() { return active_port->get_lid(); }
   ibv_gid get_gid() { return active_port->get_gid(); }
   int get_gid_idx() { return active_port->get_gid_idx(); }
@@ -404,6 +409,11 @@ class Infiniband {
   const std::string &device_name;
   uint8_t port_num;
   bool support_srq = false;
+#ifdef HAVE_UNIRDMA
+  // unirdma virtual channel that carries this stack's data path. Null when
+  // ms_async_rdma_unirdma_channel is "off" (or the build has no unirdma).
+  unirdma_channel *uch = nullptr;
+#endif
 
  public:
   explicit Infiniband(CephContext *c);
@@ -573,6 +583,22 @@ class Infiniband {
     get_memory_manager()->release_rx_buffer(chunk);
   }
   int get_tx_buffers(std::vector<Chunk*> &c, size_t bytes);
+  // Data-path wrappers. When a unirdma channel is configured these go through
+  // unirdma_* so the work request is queued on the hot or cold channel;
+  // otherwise they are plain verbs calls.
+  int post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr);
+  int post_recv(ibv_qp *qp, ibv_recv_wr *wr, ibv_recv_wr **bad_wr);
+  int post_srq_recv(ibv_srq *srq, ibv_recv_wr *wr, ibv_recv_wr **bad_wr);
+  int poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc);
+  ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *attr);
+  int destroy_qp(ibv_qp *qp);
+  bool using_unirdma() const {
+#ifdef HAVE_UNIRDMA
+    return uch != nullptr;
+#else
+    return false;
+#endif
+  }
   CompletionChannel *create_comp_channel(CephContext *c);
   CompletionQueue *create_comp_queue(CephContext *c, CompletionChannel *cc=NULL);
   uint8_t get_ib_physical_port() { return ib_physical_port; }

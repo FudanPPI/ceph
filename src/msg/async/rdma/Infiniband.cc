@@ -20,6 +20,9 @@
 #include "RDMAStack.h"
 #include <sys/time.h>
 #include <sys/resource.h>
+#ifdef HAVE_UNIRDMA
+#include <dlfcn.h>
+#endif
 
 #define dout_subsys ceph_subsys_ms
 #undef dout_prefix
@@ -29,6 +32,105 @@ static const uint32_t MAX_SHARED_RX_SGE_COUNT = 1;
 static const uint32_t MAX_INLINE_DATA = 0;
 static const uint32_t TCP_MSG_LEN = sizeof("0000:00000000:00000000:00000000:00000000000000000000000000000000");
 static const uint32_t CQ_DEPTH = 30000;
+
+#ifdef HAVE_UNIRDMA
+/**
+ * libunirdma is dlopen()ed rather than linked so a build with
+ * -DWITH_UNIRDMA=ON still runs on nodes that do not ship unirdma; there the
+ * channel simply stays disabled and the stack uses native verbs.
+ */
+struct unirdma_api {
+  unirdma_channel *(*create_virtual_channel)(int, ibv_device *);
+  int (*destroy_virtual_channel)(unirdma_channel *);
+  ibv_qp *(*create_qp)(unirdma_channel *, ibv_pd *, ibv_qp_init_attr *);
+  int (*destroy_qp)(unirdma_channel *, ibv_qp *);
+  int (*post_send)(unirdma_channel *, ibv_qp *, ibv_send_wr *, ibv_send_wr **);
+  int (*post_recv)(unirdma_channel *, ibv_qp *, ibv_recv_wr *, ibv_recv_wr **);
+  int (*post_srq_recv)(unirdma_channel *, ibv_srq *, ibv_recv_wr *, ibv_recv_wr **);
+  int (*poll_cq)(unirdma_channel *, ibv_cq *, int, ibv_wc *);
+
+  bool loaded = false;
+};
+
+static unirdma_api &unirdma_api_get()
+{
+  static unirdma_api api;
+  static bool tried = false;
+  if (tried)
+    return api;
+  tried = true;
+
+  // libunirdma normally lives in the deployment prefix; fall back to the
+  // loader search path for installations that registered it via ldconfig.
+  void *h = dlopen("/opt/unirdma/lib/libunirdma.so.1", RTLD_LAZY | RTLD_LOCAL);
+  if (!h)
+    h = dlopen("libunirdma.so.1", RTLD_LAZY | RTLD_LOCAL);
+  if (!h)
+    return api;
+
+#define LOAD_UNIRDMA_SYM(field, name)                                     \
+  do {                                                                    \
+    api.field = (decltype(api.field))dlsym(h, name);                      \
+    if (!api.field) {                                                     \
+      dlerror();                                                          \
+      return api;                                                         \
+    }                                                                     \
+  } while (0)
+
+  LOAD_UNIRDMA_SYM(create_virtual_channel, "unirdma_create_virtual_channel");
+  LOAD_UNIRDMA_SYM(destroy_virtual_channel, "unirdma_destroy_virtual_channel");
+  LOAD_UNIRDMA_SYM(create_qp, "unirdma_create_qp");
+  LOAD_UNIRDMA_SYM(destroy_qp, "unirdma_destroy_qp");
+  LOAD_UNIRDMA_SYM(post_send, "unirdma_post_send");
+  LOAD_UNIRDMA_SYM(post_recv, "unirdma_post_recv");
+  LOAD_UNIRDMA_SYM(post_srq_recv, "unirdma_post_srq_recv");
+  LOAD_UNIRDMA_SYM(poll_cq, "unirdma_poll_cq");
+#undef LOAD_UNIRDMA_SYM
+
+  api.loaded = true;
+  return api;
+}
+
+/**
+ * Open the unirdma virtual channel selected by
+ * ms_async_rdma_unirdma_channel. Returns nullptr for "off" so the stack keeps
+ * using native verbs.
+ */
+static unirdma_channel *open_unirdma_channel(CephContext *cct, ibv_device *dev)
+{
+  std::string want = cct->_conf->ms_async_rdma_unirdma_channel;
+  if (want.empty() || want == "off")
+    return nullptr;
+
+  int type;
+  if (want == "hot")
+    type = HOT_CHANNEL;
+  else if (want == "cold")
+    type = COLD_CHANNEL;
+  else {
+    lderr(cct) << __func__ << " invalid ms_async_rdma_unirdma_channel '"
+               << want << "', expect off/hot/cold" << dendl;
+    return nullptr;
+  }
+
+  unirdma_api &api = unirdma_api_get();
+  if (!api.loaded) {
+    lderr(cct) << __func__ << " cannot load libunirdma, ms_async_rdma_unirdma_channel="
+               << want << " ignored, falling back to native verbs" << dendl;
+    return nullptr;
+  }
+
+  unirdma_channel *ch = api.create_virtual_channel(type, dev);
+  if (!ch) {
+    lderr(cct) << __func__ << " unirdma_create_virtual_channel(" << want
+               << ") failed: " << cpp_strerror(errno) << dendl;
+    return nullptr;
+  }
+  ldout(cct, 1) << __func__ << " data path on unirdma " << want
+                << " channel " << ch << dendl;
+  return ch;
+}
+#endif
 
 Port::Port(CephContext *cct, struct ibv_context* ictxt, uint8_t ipn): ctxt(ictxt), port_num(ipn),
   gid_idx(cct->_conf.get_val<int64_t>("ms_async_rdma_gid_idx"))
@@ -328,7 +430,7 @@ int Infiniband::QueuePair::init()
   qpia.sq_sig_all = 0;                 // only generate CQEs on requested WQEs
 
   if (!cct->_conf->ms_async_rdma_cm) {
-    qp = ibv_create_qp(pd, &qpia);
+    qp = infiniband.create_qp(pd, &qpia);
     if (qp == NULL) {
       lderr(cct) << __func__ << " failed to create queue pair" << cpp_strerror(errno) << dendl;
       if (errno == ENOMEM) {
@@ -339,7 +441,7 @@ int Infiniband::QueuePair::init()
       return -1;
     }
     if (modify_qp_to_init() != 0) {
-      ibv_destroy_qp(qp);
+      infiniband.destroy_qp(qp);
       return -1;
     }
   } else {
@@ -489,7 +591,7 @@ int Infiniband::QueuePair::to_dead()
   beacon.wr_id = BEACON_WRID;
   beacon.opcode = IBV_WR_SEND;
   beacon.send_flags = IBV_SEND_SIGNALED;
-  if (ibv_post_send(qp, &beacon, &bad_wr)) {
+  if (infiniband.post_send(qp, &beacon, &bad_wr)) {
     lderr(cct) << __func__ << " failed to send a beacon: " << cpp_strerror(errno) << dendl;
     return -errno;
   }
@@ -658,7 +760,7 @@ int Infiniband::CompletionQueue::rearm_notify(bool solicite_only)
 }
 
 int Infiniband::CompletionQueue::poll_cq(int num_entries, ibv_wc *ret_wc_array) {
-  int r = ibv_poll_cq(cq, num_entries, ret_wc_array);
+  int r = infiniband.poll_cq(cq, num_entries, ret_wc_array);
   if (r < 0) {
     lderr(cct) << __func__ << " poll_completion_queue occur met error: "
       << cpp_strerror(errno) << dendl;
@@ -1062,6 +1164,9 @@ void Infiniband::init()
   device->binding_port(cct, port_num);
   ib_physical_port = device->active_port->get_port_num();
   pd = new ProtectionDomain(cct, device);
+#ifdef HAVE_UNIRDMA
+  uch = open_unirdma_channel(cct, device->get_ibv_device());
+#endif
   ceph_assert(ceph::NetHandler(cct).set_nonblock(device->ctxt->async_fd) == 0);
 
   support_srq = cct->_conf->ms_async_rdma_support_srq;
@@ -1120,9 +1225,69 @@ Infiniband::~Infiniband()
     return;
   if (support_srq)
     ibv_destroy_srq(srq);
+#ifdef HAVE_UNIRDMA
+  if (uch) {
+    unirdma_api_get().destroy_virtual_channel(uch);
+    uch = nullptr;
+  }
+#endif
   delete memory_manager;
   delete pd;
   delete device_list;
+}
+
+int Infiniband::post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().post_send(uch, qp, wr, bad_wr);
+#endif
+  return ibv_post_send(qp, wr, bad_wr);
+}
+
+int Infiniband::post_recv(ibv_qp *qp, ibv_recv_wr *wr, ibv_recv_wr **bad_wr)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().post_recv(uch, qp, wr, bad_wr);
+#endif
+  return ibv_post_recv(qp, wr, bad_wr);
+}
+
+int Infiniband::post_srq_recv(ibv_srq *srq, ibv_recv_wr *wr, ibv_recv_wr **bad_wr)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().post_srq_recv(uch, srq, wr, bad_wr);
+#endif
+  return ibv_post_srq_recv(srq, wr, bad_wr);
+}
+
+int Infiniband::poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().poll_cq(uch, cq, num_entries, wc);
+#endif
+  return ibv_poll_cq(cq, num_entries, wc);
+}
+
+ibv_qp *Infiniband::create_qp(ibv_pd *pd, ibv_qp_init_attr *attr)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().create_qp(uch, pd, attr);
+#endif
+  return ibv_create_qp(pd, attr);
+}
+
+int Infiniband::destroy_qp(ibv_qp *qp)
+{
+#ifdef HAVE_UNIRDMA
+  if (uch)
+    return unirdma_api_get().destroy_qp(uch, qp);
+#endif
+  return ibv_destroy_qp(qp);
 }
 
 /**
@@ -1218,10 +1383,10 @@ int Infiniband::post_chunks_to_rq(int rq_wr_num, QueuePair *qp)
 
   ibv_recv_wr *badworkrequest = nullptr;
   if (support_srq) {
-    ret = ibv_post_srq_recv(srq, rx_work_request, &badworkrequest);
+    ret = post_srq_recv(srq, rx_work_request, &badworkrequest);
   } else {
     ceph_assert(qp);
-    ret = ibv_post_recv(qp->get_qp(), rx_work_request, &badworkrequest);
+    ret = post_recv(qp->get_qp(), rx_work_request, &badworkrequest);
   }
 
   ::free(rx_work_request);
@@ -1257,7 +1422,7 @@ Infiniband::QueuePair::~QueuePair()
   ldout(cct, 20) << __func__ << " destroy Queue Pair, qp number: " << qp->qp_num << " left SQ WR " << recv_queue.size() << dendl;
   if (qp) {
     ldout(cct, 20) << __func__ << " destroy qp=" << qp << dendl;
-    ceph_assert(!ibv_destroy_qp(qp));
+    ceph_assert(!infiniband.destroy_qp(qp));
   }
 
   for (auto& chunk: recv_queue) {

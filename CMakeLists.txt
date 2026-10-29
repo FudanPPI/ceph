@@ -157,6 +157,41 @@ if(WITH_RDMA)
   set(HAVE_RDMA TRUE)
 endif()
 
+# unirdma hot/cold channel support for the RDMA messenger data path.
+# Only the header is needed at build time: libunirdma is dlopen()ed at runtime
+# so ceph binaries still start on nodes without unirdma installed.
+# e.g. -DUNIRDMA_ROOT=/opt/unirdma
+option(WITH_UNIRDMA "Enable unirdma hot/cold channel in async messenger" OFF)
+if(WITH_UNIRDMA)
+  if(NOT WITH_RDMA)
+    message(FATAL_ERROR "WITH_UNIRDMA requires WITH_RDMA")
+  endif()
+  if(UNIRDMA_ROOT)
+    set(_unirdma_hint ${UNIRDMA_ROOT})
+  endif()
+  find_path(UNIRDMA_INCLUDE_DIR
+    NAMES infiniband/unirdma.h
+    HINTS ${_unirdma_hint}/include)
+  if(NOT UNIRDMA_INCLUDE_DIR)
+    message(FATAL_ERROR
+      "WITH_UNIRDMA is ON but infiniband/unirdma.h was not found. "
+      "Pass -DUNIRDMA_ROOT=/path/to/unirdma.")
+  endif()
+  # unirdma ships a patched rdma-core header tree. Search it only after the
+  # system headers (-idirafter) so /usr/include/infiniband/verbs.h wins and the
+  # rest of ceph keeps compiling against the installed verbs ABI.
+  # only C/C++ compile units; the isa-l/nasm sources must not see this flag.
+  # guard against repeated appends when cmake re-runs on an existing cache.
+  foreach(_lang C CXX)
+    string(FIND "${CMAKE_${_lang}_FLAGS}" "-idirafter ${UNIRDMA_INCLUDE_DIR}" _found)
+    if(_found EQUAL -1)
+      string(APPEND CMAKE_${_lang}_FLAGS " -idirafter ${UNIRDMA_INCLUDE_DIR}")
+    endif()
+  endforeach()
+  set(HAVE_UNIRDMA TRUE)
+  message(STATUS "unirdma headers: ${UNIRDMA_INCLUDE_DIR}")
+endif()
+
 find_package(Backtrace)
 
 option(WITH_RBD "Enable RADOS Block Device related targets" ON)

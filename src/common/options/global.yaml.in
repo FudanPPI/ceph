@@ -1415,6 +1415,16 @@ options:
   level: advanced
   default: ib
   with_legacy: true
+# which unirdma virtual channel carries the RDMA messenger data path:
+#   off  - native verbs (default, unchanged behaviour)
+#   hot  - low-latency channel, no chunking/rate limiting
+#   cold - chunked (8K) channel with token-bucket rate limiting
+# requires a build with -DWITH_UNIRDMA=ON; otherwise the value is ignored.
+- name: ms_async_rdma_unirdma_channel
+  type: str
+  level: advanced
+  default: "off"
+  with_legacy: true
 - name: ms_dpdk_port_id
   type: int
   level: advanced

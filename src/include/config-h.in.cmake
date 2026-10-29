@@ -127,6 +127,9 @@
 /* AsyncMessenger RDMA conditional compilation */
 #cmakedefine HAVE_RDMA
 
+/* unirdma hot/cold channel in the RDMA messenger */
+#cmakedefine HAVE_UNIRDMA
+
 /* ibverbs experimental conditional compilation */
 #cmakedefine HAVE_IBV_EXP
 
