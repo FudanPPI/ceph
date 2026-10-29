@@ -545,14 +545,14 @@ add_dependencies(tests
 if(NOT WIN32)
   # Not currently supported on Windows
   add_dependencies(tests
-  ceph-mon
+  idfs-mon
   get_command_descriptions
   ceph-dencoder
   ceph-dencoder-modules
   ceph-objectstore-tool
   ceph-kvstore-tool
   ceph-monstore-tool
-  ceph-osd
+  idfs-osd
   osdmaptool
   ceph_example
   ceph_snappy
@@ -564,10 +564,10 @@ if(NOT WIN32)
   monmaptool)
 
 if (WITH_CEPHFS)
-  add_dependencies(tests ceph-mds)
+  add_dependencies(tests idfs-mds)
 endif()
 if(WITH_MGR)
-  add_dependencies(tests ceph-mgr)
+  add_dependencies(tests idfs-mgr)
 endif()
 if(WITH_RBD)
   add_dependencies(tests unittest_librbd rbd)

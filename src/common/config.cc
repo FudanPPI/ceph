@@ -55,9 +55,9 @@ using ceph::decode;
 using ceph::encode;
 using ceph::Formatter;
 
-static const char *CEPH_CONF_FILE_DEFAULT = "$data_dir/config,/etc/ceph/$cluster.conf,$home/.ceph/$cluster.conf,$cluster.conf"
+static const char *CEPH_CONF_FILE_DEFAULT = "$data_dir/config,/etc/idfs/$cluster.conf,$home/.ceph/$cluster.conf,$cluster.conf"
 #if defined(__FreeBSD__)
-    ",/usr/local/etc/ceph/$cluster.conf"
+    ",/usr/local/etc/idfs/$cluster.conf"
 #elif defined(_WIN32)
     ",$programdata/ceph/$cluster.conf"
 #endif
@@ -462,11 +462,11 @@ std::string md_config_t::get_cluster_name(const char* conffile)
       // If the configuration file does not follow $cluster.conf
       // convention, we do the last try and assign the cluster to
       // 'ceph'.
-      return "ceph";
+      return "idfs";
     }
   } else {
-    // set the cluster name to 'ceph' when configuration file is not specified.
-    return "ceph";
+    // set the cluster name to 'idfs' when configuration file is not specified.
+    return "idfs";
   }
 }
 

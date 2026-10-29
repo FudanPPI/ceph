@@ -66,7 +66,7 @@ def main(arguments):
     fs_opts = fs_options(options, ceph_opts)
     ceph_opts = ' '.join(['--' + o.replace('ceph.', '', 1) for o in ceph_opts])
 
-    command = 'ceph-fuse %s %s' % (ceph_opts, mountpoint)
+    command = 'idfs-fuse %s %s' % (ceph_opts, mountpoint)
 
     if fs_opts:
         command += ' -o %s' % (fs_opts)

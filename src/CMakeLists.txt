@@ -63,7 +63,7 @@ list(GET CEPH_RELEASE_FILE 1 CEPH_RELEASE_NAME)
 list(GET CEPH_RELEASE_FILE 2 CEPH_RELEASE_TYPE)
 
 configure_file(${CMAKE_SOURCE_DIR}/src/ceph.in
-  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ceph @ONLY)
+  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/idfs @ONLY)
 
 # Common infrastructure
 configure_file(
@@ -602,15 +602,15 @@ endif(NOT WIN32)
 add_subdirectory(mon)
 set(ceph_mon_srcs
   ceph_mon.cc)
-add_executable(ceph-mon ${ceph_mon_srcs}
+add_executable(idfs-mon ${ceph_mon_srcs}
   $<TARGET_OBJECTS:common_texttable_obj>)
-add_dependencies(ceph-mon erasure_code_plugins)
-target_link_libraries(ceph-mon mon os global-static ceph-common
+add_dependencies(idfs-mon erasure_code_plugins)
+target_link_libraries(idfs-mon mon os global-static ceph-common
   ${ALLOC_LIBS}
   ${EXTRALIBS}
   ${CMAKE_DL_LIBS}
   ${GSSAPI_LIBRARIES})
-install(TARGETS ceph-mon DESTINATION bin)
+install(TARGETS idfs-mon DESTINATION bin)
 
 # OSD/ObjectStore
 
@@ -634,18 +634,18 @@ set(ceph_osd_srcs
   objclass/class_api.cc
   ceph_osd.cc)
 
-add_executable(ceph-osd ${ceph_osd_srcs})
-add_dependencies(ceph-osd erasure_code_plugins)
-target_link_libraries(ceph-osd osd os global-static common
+add_executable(idfs-osd ${ceph_osd_srcs})
+add_dependencies(idfs-osd erasure_code_plugins)
+target_link_libraries(idfs-osd osd os global-static common
   ${ALLOC_LIBS}
   ${BLKID_LIBRARIES})
 if(WITH_FUSE)
-  target_link_libraries(ceph-osd FUSE::FUSE)
+  target_link_libraries(idfs-osd FUSE::FUSE)
 endif()
-set_target_properties(ceph-osd PROPERTIES
+set_target_properties(idfs-osd PROPERTIES
   POSITION_INDEPENDENT_CODE ${EXE_LINKER_USE_PIE}
   INSTALL_RPATH "")
-install(TARGETS ceph-osd DESTINATION bin)
+install(TARGETS idfs-osd DESTINATION bin)
 
 endif(NOT WIN32)
 
@@ -653,11 +653,11 @@ if (WITH_CEPHFS)
   add_subdirectory(mds)
   set(ceph_mds_srcs
     ceph_mds.cc)
-  add_executable(ceph-mds ${ceph_mds_srcs})
-  target_link_libraries(ceph-mds mds ${CMAKE_DL_LIBS} global-static ceph-common
+  add_executable(idfs-mds ${ceph_mds_srcs})
+  target_link_libraries(idfs-mds mds ${CMAKE_DL_LIBS} global-static ceph-common
     Boost::thread
     ${ALLOC_LIBS})
-  install(TARGETS ceph-mds DESTINATION bin)
+  install(TARGETS idfs-mds DESTINATION bin)
 endif()
 
 add_subdirectory(erasure-code)
@@ -711,7 +711,7 @@ if(WITH_TESTS)
 endif()
 
 install(PROGRAMS
-  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ceph
+  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/idfs
   ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ceph-post-file
   ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ceph-crash
   ceph-run
@@ -720,7 +720,7 @@ install(PROGRAMS
 install(PROGRAMS
   ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/init-ceph
   DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/init.d
-  RENAME ceph)
+  RENAME idfs)
 
 install(FILES
   ${CMAKE_SOURCE_DIR}/share/id_rsa_drop.ceph.com
@@ -790,13 +790,13 @@ if(WITH_FUSE)
   set(ceph_fuse_srcs
     ceph_fuse.cc
     client/fuse_ll.cc)
-  add_executable(ceph-fuse ${ceph_fuse_srcs})
-  target_link_libraries(ceph-fuse FUSE::FUSE
+  add_executable(idfs-fuse ${ceph_fuse_srcs})
+  target_link_libraries(idfs-fuse FUSE::FUSE
     ${GSSAPI_LIBRARIES} client ceph-common global-static ${EXTRALIBS})
-  set_target_properties(ceph-fuse PROPERTIES
+  set_target_properties(idfs-fuse PROPERTIES
     POSITION_INDEPENDENT_CODE ${EXE_LINKER_USE_PIE})
-  install(TARGETS ceph-fuse DESTINATION bin)
-  install(PROGRAMS mount.fuse.ceph DESTINATION ${CMAKE_INSTALL_SBINDIR})
+  install(TARGETS idfs-fuse DESTINATION bin)
+  install(PROGRAMS mount.fuse.idfs DESTINATION ${CMAKE_INSTALL_SBINDIR})
 endif(WITH_FUSE)
 
 if(WITH_DOKAN)
@@ -869,8 +869,8 @@ configure_file(
 
 # Everything you need to spin up a cluster with vstart.sh
 add_custom_target(vstart-base DEPENDS
-    ceph-osd
-    ceph-mon
+    idfs-osd
+    idfs-mon
     ceph-authtool
     ceph-conf
     monmaptool
@@ -884,7 +884,7 @@ if(NOT WIN32)
 endif()
 
 if (WITH_MGR)
-  add_dependencies(vstart-base ceph-mgr)
+  add_dependencies(vstart-base idfs-mgr)
   add_dependencies(vstart-base ceph-exporter)
 endif()
 
@@ -893,7 +893,7 @@ if(WITH_RBD AND NOT WIN32)
   add_dependencies(vstart cython_rbd)
 endif()
 if (WITH_CEPHFS)
-  add_dependencies(vstart ceph-mds cephfs cython_cephfs)
+  add_dependencies(vstart idfs-mds cephfs cython_cephfs)
 endif()
 if(WITH_RADOSGW)
   add_dependencies(vstart radosgwd radosgw-admin)
@@ -918,7 +918,7 @@ add_custom_target(cephfs_testing DEPENDS
     cython_modules
     cephfs
     cls_cephfs
-    ceph-fuse
+    idfs-fuse
     ceph-dencoder
     ceph-dencoder-modules
     cephfs-journal-tool

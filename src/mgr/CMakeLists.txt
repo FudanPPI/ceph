@@ -33,14 +33,14 @@ if(WITH_MGR)
     StandbyPyModules.cc
     mgr_commands.cc
     $<TARGET_OBJECTS:mgr_cap_obj>)
-  add_executable(ceph-mgr ${mgr_srcs})
-  target_compile_definitions(ceph-mgr PRIVATE PY_SSIZE_T_CLEAN)
+  add_executable(idfs-mgr ${mgr_srcs})
+  target_compile_definitions(idfs-mgr PRIVATE PY_SSIZE_T_CLEAN)
   if(WITH_LIBCEPHSQLITE)
-    target_link_libraries(ceph-mgr cephsqlite SQLite3::SQLite3)
+    target_link_libraries(idfs-mgr cephsqlite SQLite3::SQLite3)
   endif()
-  target_include_directories(ceph-mgr PRIVATE
+  target_include_directories(idfs-mgr PRIVATE
     $<TARGET_PROPERTY:RocksDB::RocksDB,INTERFACE_INCLUDE_DIRECTORIES>)
-  target_link_libraries(ceph-mgr
+  target_link_libraries(idfs-mgr
     osdc client heap_profiler
     global-static ceph-common
     Boost::python${MGR_PYTHON_VERSION_MAJOR}${MGR_PYTHON_VERSION_MINOR}
@@ -48,7 +48,7 @@ if(WITH_MGR)
     ${ALLOC_LIBS}
     ${CMAKE_DL_LIBS}
     ${GSSAPI_LIBRARIES})
-  set_target_properties(ceph-mgr PROPERTIES
+  set_target_properties(idfs-mgr PROPERTIES
     POSITION_INDEPENDENT_CODE ${EXE_LINKER_USE_PIE})
-  install(TARGETS ceph-mgr DESTINATION bin)
+  install(TARGETS idfs-mgr DESTINATION bin)
 endif()
